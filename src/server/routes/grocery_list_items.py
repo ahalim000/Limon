@@ -1,16 +1,23 @@
-from typing import List, Optional
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from server.dependencies import get_storage_manager
-from server.storage.storage_manager import StorageManager
-from server.storage.models import GroceryListItem
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-router = APIRouter(prefix="/api/grocery_list_items")
+from server.dependencies import get_current_user, get_db
+from server.storage.models import GroceryListItem, User
+from server.storage.utils import safe_query
+
+router = APIRouter(prefix="/api/grocery_list_items", tags=["grocery_list_items"])
 
 
 @router.put("/{id}/toggle", status_code=204)
 def toggle_grocery_list_item(
-    id: int, sm: StorageManager = Depends(get_storage_manager)
+    id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ):
-    grocery_list_item = sm.get(GroceryListItem, {"id": id})
-    sm.update(GroceryListItem, {"id": id}, {"active": not grocery_list_item.active})
+    grocery_list_item = db.scalars(
+        safe_query(select, [GroceryListItem], user).filter_by(id=id)
+    ).one()
+
+    setattr(grocery_list_item, "active", not grocery_list_item.active)
+
+    db.add(grocery_list_item)
+    db.commit()

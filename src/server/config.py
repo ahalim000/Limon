@@ -1,5 +1,7 @@
 import os
 
+from typing import List
+
 
 class Config:
     def __init__(self):
@@ -12,6 +14,7 @@ class Config:
         self.bootstrap_admin_password: str = os.environ[
             "RECIPE_BOOTSTRAP_ADMIN_PASSWORD"
         ]
+        self.static_dir: str = os.environ["RECIPE_STATIC_DIR"]
 
 
 CONFIG = Config()

@@ -1,14 +1,13 @@
 from typing import Any, Dict, List, Optional, Type, TypeVar
 
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
-from server.storage.models import UserIdMixin, User
-
 from sqlalchemy import inspect
+from sqlalchemy.orm import Session
 from sqlalchemy.orm.collections import InstrumentedList
 
+from server.storage.models import User
 
-UserIdGeneric = TypeVar("UserIdGeneric", bound=UserIdMixin)
+UserIdGeneric = TypeVar("UserIdGeneric")
 
 
 class StorageManager:

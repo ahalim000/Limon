@@ -161,3 +161,6 @@ cython_debug/
 
 .envrc
 .vscode
+load_test_data.py
+test_data/
+static/

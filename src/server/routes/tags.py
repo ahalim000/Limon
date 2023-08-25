@@ -1,64 +1,77 @@
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from server.dependencies import get_storage_manager
-from server.storage.storage_manager import StorageManager
-from server.storage.models import Tag
+from fastapi_pagination import Page
+from fastapi_pagination.ext.sqlalchemy import paginate
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from server.dependencies import get_current_user, get_db
+from server.schemas import TagCreateSchema, TagSchema, TagUpdateSchema, TagListSchema
+from server.storage.models import Tag, User
+from server.storage.utils import safe_query
+
+router = APIRouter(prefix="/api/tags", tags=["tags"])
 
 
-router = APIRouter(prefix="/api/tags")
-
-
-class TagCreateUpdateSchema(BaseModel):
-    name: str
-
-
-class TagSchema(BaseModel):
-    id: int
-    name: str
-
-    class Config:
-        orm_mode = True
-
-
-class ListTagSchema(BaseModel):
-    items: List[TagSchema]
-
-
-@router.get("", response_model=ListTagSchema)
+@router.get("", response_model=Page[TagSchema])
 def list_tags(
-    name: Optional[str] = None, sm: StorageManager = Depends(get_storage_manager)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    params: TagListSchema = Depends(),  # type: ignore
 ):
-    filters = {}
-    if name is not None:
-        filters["name"] = name
+    query = safe_query(select, [Tag], user)
 
-    tags = sm.list(Tag, filters, [Tag.name])
+    for param_key, param_val in params.dict(exclude_unset=True).items():
+        if param_val is not None:
+            query = query.filter(getattr(Tag, param_key) == param_val)
 
-    return {"items": tags}
+    return paginate(db, query)
 
 
 @router.post("", response_model=TagSchema)
 def create_tag(
-    request_data: TagCreateUpdateSchema,
-    sm: StorageManager = Depends(get_storage_manager),
+    request_data: TagCreateSchema,  # type: ignore
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    request_data = request_data.dict()
+    request_data = request_data.dict(exclude_unset=True)
 
-    return sm.create(Tag, request_data)
+    tag = Tag(user_id=user.id, **request_data)
+
+    db.add(tag)
+    db.commit()
+
+    return tag
 
 
 @router.put("/{id}", response_model=TagSchema)
 def update_tag(
     id: int,
-    request_data: TagCreateUpdateSchema,
-    sm: StorageManager = Depends(get_storage_manager),
+    request_data: TagUpdateSchema,  # type: ignore
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    request_data = request_data.dict()
+    request_data = request_data.dict(exclude_unset=True)
 
-    return sm.update(Tag, {"id": id}, request_data)
+    tag = db.scalars(safe_query(select, [Tag], user).filter_by(id=id)).one()
+
+    for key, val in request_data.items():
+        setattr(tag, key, val)
+
+    db.add(tag)
+    db.commit()
+
+    return tag
 
 
 @router.delete("/{id}", response_model=TagSchema)
-def delete_tag(id: int, sm: StorageManager = Depends(get_storage_manager)):
-    return sm.delete(Tag, {"id": id})
+def delete_tag(
+    id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    tag = db.scalars(safe_query(select, [Tag], user).filter_by(id=id)).one()
+
+    db.delete(tag)
+    db.commit()
+
+    return tag

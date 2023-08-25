@@ -1,193 +1,205 @@
-from typing import List, Optional
-from datetime import time
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from server.dependencies import get_storage_manager
-from server.storage.storage_manager import StorageManager
-from server.storage.models import Ingredient, Recipe, RecipeTagAssoc, Step, Tag
+import re
+import os
+import uuid
+import magic
+
+from typing import List
+
+from fastapi import APIRouter, Depends, UploadFile, HTTPException
+from fastapi_pagination import Page
+from fastapi_pagination.ext.sqlalchemy import paginate
+from ingredient_parser import parse_ingredient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from sqlalchemy.sql.expression import func
+
+from server.dependencies import get_current_user, get_db
+from server.schemas import (
+    RecipeCreateSchema,
+    RecipeSchema,
+    RecipeUpdateSchema,
+    RecipeListSchema,
+)
+from server.storage.models import Ingredient, Recipe, Step, Tag, User
+from server.storage.utils import safe_query
+from server.config import CONFIG
+from server.constants import ALLOWED_IMAGE_FORMATS, IMAGE_FORMAT_EXTENSION_MAP
+
+router = APIRouter(prefix="/api/recipes", tags=["recipes"])
 
 
-router = APIRouter(prefix="/api/recipes")
+def parse_ingredients(data: List[str]) -> List[Ingredient]:
+    processed_data = []
+    for ingredient in data:
+        processed_ingredient = ingredient.strip()
+        if processed_ingredient:
+            processed_data.append(processed_ingredient)
+
+    ingredients = []
+    for index, ingredient in enumerate(data):
+        parsed = parse_ingredient(ingredient)
+        raw_quantity = parsed.get("quantity", "")
+        matched_quantity = re.match(
+            r"[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)", raw_quantity
+        )
+        quantity = matched_quantity[0] if matched_quantity else 0.0
+
+        ingredient = Ingredient(
+            quantity=quantity,
+            unit=parsed["unit"],
+            name=parsed["name"],
+            comment=parsed["comment"],
+            input=parsed["sentence"],
+            position=index,
+        )
+        ingredients.append(ingredient)
+
+    return ingredients
 
 
-class IngredientSchema(BaseModel):
-    id: int
-    user_id: int
-    recipe_id: int
-    quantity: Optional[int]
-    unit: Optional[str]
-    name: str
-    comment: Optional[str]
-    input: Optional[str]
-
-    class Config:
-        orm_mode = True
-
-
-class IngredientCreateSchema(BaseModel):
-    quantity: Optional[int]
-    unit: Optional[str]
-    name: str
-    comment: Optional[str]
-    input: Optional[str]
-
-
-class StepSchema(BaseModel):
-    id: int
-    user_id: int
-    recipe_id: int
-    text: str
-
-    class Config:
-        orm_mode = True
-
-
-class TagSchema(BaseModel):
-    id: int
-    name: str
-
-    class Config:
-        orm_mode = True
-
-
-class RecipeCreateSchema(BaseModel):
-    name: str
-    image_url: Optional[str]
-    thumbnail_url: Optional[str]
-    source: Optional[str]
-    servings: int
-    servings_type: Optional[str]
-    prep_time: Optional[time]
-    cook_time: Optional[time]
-    description: Optional[str]
-    nutrition: Optional[str]
-    favorite: Optional[bool]
-    ingredient_schemas: Optional[List[IngredientCreateSchema]]
-    step_texts: Optional[List[str]]
-    tag_ids: Optional[List[int]]
-
-
-class RecipeUpdateSchema(BaseModel):
-    name: Optional[str]
-    image_url: Optional[str]
-    thumbnail_url: Optional[str]
-    source: Optional[str]
-    servings: Optional[int]
-    servings_type: Optional[str]
-    prep_time: Optional[time]
-    cook_time: Optional[time]
-    description: Optional[str]
-    nutrition: Optional[str]
-    favorite: Optional[bool]
-    ingredient_schemas: Optional[List[IngredientCreateSchema]]
-    step_texts: Optional[List[str]]
-    tag_ids: Optional[List[int]]
-
-
-class RecipeSchema(BaseModel):
-    id: int
-    user_id: int
-    name: str
-    image_url: Optional[str]
-    thumbnail_url: Optional[str]
-    source: Optional[str]
-    servings: int
-    servings_type: Optional[str]
-    prep_time: Optional[time]
-    cook_time: Optional[time]
-    description: Optional[str]
-    nutrition: Optional[str]
-    favorite: Optional[bool]
-    ingredients: List[IngredientSchema]
-    steps: List[StepSchema]
-    tags: List[TagSchema]
-
-    class Config:
-        orm_mode = True
-
-
-class ListRecipeSchema(BaseModel):
-    items: List[RecipeSchema]
-
-
-@router.get("", response_model=ListRecipeSchema)
+@router.get("", response_model=Page[RecipeSchema])
 def list_recipes(
-    name: Optional[str] = None, sm: StorageManager = Depends(get_storage_manager)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    params: RecipeListSchema = Depends(),  # type: ignore
+    sort: str = "alpha",
 ):
-    filters = {}
-    if name is not None:
-        filters["name"] = name
+    query = safe_query(select, [Recipe], user)
+    if sort == "alpha":
+        query = query.order_by(Recipe.name)
+    elif sort == "rand":
+        query = query.order_by(func.random())
+    else:
+        raise Exception(f"Sort type unsupported: {sort}")
 
-    recipes = sm.list(Recipe, filters, [Recipe.name])
+    for param_key, param_val in params.dict(exclude_unset=True).items():
+        if param_val is not None:
+            query = query.filter(getattr(Recipe, param_key) == param_val)
 
-    return {"items": recipes}
+    return paginate(db, query)
+
+
+@router.post("/{id}/upload_image", response_model=RecipeSchema)
+def upload_recipe_image(
+    id: int,
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    file_data = file.file.read()
+    mime_type = magic.from_buffer(file_data, mime=True)
+    if mime_type not in ALLOWED_IMAGE_FORMATS:
+        raise HTTPException(
+            status_code=400, detail=f"Image file format not supported: {mime_type}"
+        )
+    extension = IMAGE_FORMAT_EXTENSION_MAP[mime_type]
+
+    recipe = db.scalars(safe_query(select, [Recipe], user).filter_by(id=id)).one()
+    user_id = recipe.user_id
+    dst_folder = os.path.join(CONFIG.static_dir, str(user_id))
+    os.makedirs(dst_folder, exist_ok=True)
+
+    filename = f"{uuid.uuid4()}{extension}"
+    dst_file = os.path.join(dst_folder, filename)
+    with open(dst_file, "wb") as f:
+        f.write(file_data)
+
+    if recipe.image_url:
+        os.unlink(recipe.image_url)
+
+    recipe.image_url = f"/static/{user_id}/{filename}"
+    db.add(recipe)
+    db.commit()
+    return recipe
 
 
 @router.post("", response_model=RecipeSchema)
 def create_recipe(
-    request_data: RecipeCreateSchema, sm: StorageManager = Depends(get_storage_manager)
+    request_data: RecipeCreateSchema, db: Session = Depends(get_db), user: User = Depends(get_current_user)  # type: ignore
 ):
     request_data = request_data.dict(exclude_unset=True)
 
-    ingredient_schemas = request_data.pop("ingredient_schemas", [])
-    step_texts = request_data.pop("steps_texts", [])
+    ingredients_data = request_data.pop("ingredients", [])
+    steps_data = request_data.pop("steps", [])
     tag_ids = request_data.pop("tag_ids", [])
 
-    recipe = sm.create(Recipe, request_data)
+    recipe = Recipe(user_id=user.id, **request_data)
 
-    for index, schema in enumerate(ingredient_schemas):
-        schema["recipe_id"] = recipe.id
-        schema["position"] = index
-        sm.create(Ingredient, schema)
+    recipe.ingredients.extend(parse_ingredients(ingredients_data))
 
-    for index, text in enumerate(step_texts):
-        sm.create(Step, {"recipe_id": id, "text": text, "position": index})
+    processed_steps_data = []
+    for text in steps_data:
+        processed_text = text.strip()
+        if processed_text:
+            processed_steps_data.append(processed_text)
+
+    for index, text in enumerate(processed_steps_data):
+        recipe.steps.append(Step(text=text, position=index))
 
     for tag_id in tag_ids:
-        sm.create(RecipeTagAssoc, {"recipe_id": recipe.id, "tag_id": tag_id})
+        tag = db.scalars(safe_query(select, [Tag], user).filter_by(id=tag_id)).one()
+        recipe.tags.append(tag)
+
+    db.add(recipe)
+    db.commit()
 
     return recipe
 
 
 @router.get("/{id}", response_model=RecipeSchema)
-def get_recipe(id: int, sm: StorageManager = Depends(get_storage_manager)):
-    return sm.get(Recipe, {"id": id})
+def get_recipe(
+    id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    return db.scalars(safe_query(select, [Recipe], user).filter_by(id=id)).one()
 
 
 @router.put("/{id}", response_model=RecipeSchema)
 def update_recipe(
     id: int,
-    request_data: RecipeUpdateSchema,
-    sm: StorageManager = Depends(get_storage_manager),
+    request_data: RecipeUpdateSchema,  # type: ignore
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     request_data = request_data.dict(exclude_unset=True)
 
-    ingredient_schemas = request_data.pop("ingredient_schemas", [])
-    step_texts = request_data.pop("step_texts", [])
+    ingredients_data = request_data.pop("ingredients", [])
+    steps_data = request_data.pop("steps", [])
     tag_ids = request_data.pop("tag_ids", [])
 
-    if ingredient_schemas:
-        ingredients = []
-        for index, schema in enumerate(ingredient_schemas):
-            schema["position"] = index
-            ingredients.append(Ingredient(**schema))
-        request_data["ingredients"] = ingredients
+    recipe = db.scalars(safe_query(select, [Recipe], user).filter_by(id=id)).one()
 
-    if step_texts:
-        steps = []
-        for index, text in enumerate(step_texts):
-            steps.append(Step(text=text, position=index))
-        request_data["steps"] = steps
+    for key, val in request_data.items():
+        setattr(recipe, key, val)
+
+    if ingredients_data:
+        recipe.ingredients.clear()
+        recipe.ingredients.extend(parse_ingredients(ingredients_data))
+
+    if steps_data:
+        recipe.steps.clear()
+        for index, text in enumerate(steps_data):
+            recipe.steps.append(Step(text=text, position=index))
 
     if tag_ids:
-        tags = []
+        recipe.tags.clear()
         for tag_id in tag_ids:
-            tags.append(Tag(recipe_id=id, tag_id=tag_id))
-        request_data["tags"] = tags
+            tag = db.scalars(safe_query(select, [Tag], user).filter_by(id=tag_id)).one()
+            recipe.tags.append(tag)
 
-    return sm.update(Recipe, {"id": id}, request_data)
+    db.add(recipe)
+    db.commit()
+
+    return recipe
 
 
 @router.delete("/{id}", response_model=RecipeSchema)
-def delete_recipe(id: int, sm: StorageManager = Depends(get_storage_manager)):
-    return sm.delete(Recipe, {"id": id})
+def delete_recipe(
+    id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    recipe = db.scalars(safe_query(select, [Recipe], user).filter_by(id=id)).one()
+    resp = RecipeSchema.from_orm(recipe)
+
+    db.delete(recipe)
+    db.commit()
+
+    return resp

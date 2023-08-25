@@ -1,92 +1,101 @@
 from datetime import datetime
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from server.dependencies import get_storage_manager
-from server.storage.storage_manager import StorageManager
-from server.storage.models import MealPlanItem, Recipe
+from fastapi_pagination import Page
+from fastapi_pagination.ext.sqlalchemy import paginate
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from server.dependencies import get_current_user, get_db
+from server.schemas import (
+    MealPlanItemCreateSchema,
+    MealPlanItemSchema,
+    MealPlanItemUpdateSchema,
+    MealPlanItemListSchema,
+)
+from server.storage.models import MealPlanItem, Recipe, User
+from server.storage.utils import safe_query
+
+router = APIRouter(prefix="/api/meal_plan_items", tags=["meal_plan_items"])
 
 
-router = APIRouter(prefix="/api/meal_plan_items")
-
-
-class MealPlanItemCreateSchema(BaseModel):
-    recipe_id: int
-    date: int
-    servings: Optional[int]
-    meal_type: Optional[str]
-
-
-class MealPlanItemUpdateSchema(BaseModel):
-    recipe_id: Optional[int]
-    date: Optional[int]
-    servings: Optional[int]
-    meal_type: Optional[str]
-
-
-class MealPlanItemSchema(BaseModel):
-    id: int
-    recipe_id: int
-    date: datetime
-    servings: int
-    meal_type: Optional[str]
-    user_id: int
-
-    class Config:
-        orm_mode = True
-
-
-class ListMealPlanItemSchema(BaseModel):
-    items: List[MealPlanItemSchema]
-
-
-@router.get("", response_model=ListMealPlanItemSchema)
+@router.get("", response_model=Page[MealPlanItemSchema])
 def list_meal_plan_items(
-    start_date: int, end_date: int, sm: StorageManager = Depends(get_storage_manager)
+    start_date: datetime,
+    end_date: datetime,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    params: MealPlanItemListSchema = Depends(),  # type: ignore
 ):
-    filters = {
-        "start_date": datetime.fromtimestamp(start_date),
-        "end_date": datetime.fromtimestamp(end_date),
-    }
+    query = safe_query(select, [MealPlanItem], user).filter(
+        MealPlanItem.date >= start_date, MealPlanItem.date <= end_date
+    )
 
-    meal_plan_items = sm.list(MealPlanItem, filters, [MealPlanItem.date])
+    for param_key, param_val in params.dict(exclude_unset=True).items():
+        if param_val is not None:
+            query = query.filter(getattr(MealPlanItem, param_key) == param_val)
 
-    return {"items": meal_plan_items}
+    return paginate(db, query)
 
 
 @router.post("", response_model=MealPlanItemSchema)
 def create_meal_plan_item(
-    request_data: MealPlanItemCreateSchema,
-    sm: StorageManager = Depends(get_storage_manager),
+    request_data: MealPlanItemCreateSchema,  # type: ignore
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     request_data = request_data.dict(exclude_unset=True)
-    request_data["date"] = datetime.fromtimestamp(request_data["date"])
 
-    recipe = sm.get(Recipe, request_data["recipe_id"])
-    request_data["recipe"] = recipe
+    recipe = db.scalars(
+        safe_query(select, [Recipe], user).filter_by(id=request_data["recipe_id"])
+    ).one()
 
-    if "servings" not in request_data:
-        request_data["servings"] = recipe.servings
+    meal_plan_item = MealPlanItem(recipe=recipe, **request_data)
 
-    return sm.create(MealPlanItem, request_data)
+    db.add(meal_plan_item)
+    db.commit()
+
+    return meal_plan_item
 
 
 @router.get("/{id}", response_model=MealPlanItemSchema)
-def get_meal_plan_item(id: int, sm: StorageManager = Depends(get_storage_manager)):
-    return sm.get(MealPlanItem, {"id": id})
+def get_meal_plan_item(
+    id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    return db.scalars(safe_query(select, [MealPlanItem], user).filter_by(id=id)).one()
 
 
 @router.put("/{id}", response_model=MealPlanItemSchema)
 def update_meal_plan_item(
     id: int,
-    request_data: MealPlanItemUpdateSchema,
-    sm: StorageManager = Depends(get_storage_manager),
+    request_data: MealPlanItemUpdateSchema,  # type: ignore
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     request_data = request_data.dict(exclude_unset=True)
 
-    return sm.update(MealPlanItem, {"id": id}, request_data)
+    meal_plan_item = db.scalars(
+        safe_query(select, [MealPlanItem], user).filter_by(id=id)
+    ).one()
+
+    for key, val in request_data.items():
+        setattr(meal_plan_item, key, val)
+
+    db.add(meal_plan_item)
+    db.commit()
+
+    return meal_plan_item
 
 
 @router.delete("/{id}", response_model=MealPlanItemSchema)
-def delete_meal_plan_item(id: int, sm: StorageManager = Depends(get_storage_manager)):
-    return sm.delete(MealPlanItem, {"id": id})
+def delete_meal_plan_item(
+    id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    meal_plan_item = db.scalars(
+        safe_query(select, [MealPlanItem], user).filter_by(id=id)
+    ).one()
+
+    db.delete(meal_plan_item)
+    db.commit()
+
+    return meal_plan_item

@@ -1,7 +1,7 @@
-from fastapi import Request, Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
-from jose import jwt, JWTError
 
 from server.config import CONFIG
 from server.storage.models import User

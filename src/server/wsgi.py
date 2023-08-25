@@ -1,5 +1,6 @@
-import os
 import logging
+import os
+
 from fastapi.logger import logger as fastapi_logger
 
 from server.app import init_app
