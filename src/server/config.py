@@ -1,7 +1,5 @@
 import os
 
-from typing import List
-
 
 class Config:
     def __init__(self):

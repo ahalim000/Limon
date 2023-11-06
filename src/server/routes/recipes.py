@@ -38,18 +38,17 @@ def parse_ingredients(data: List[str]) -> List[Ingredient]:
     ingredients = []
     for index, ingredient in enumerate(data):
         parsed = parse_ingredient(ingredient)
-        raw_quantity = parsed.get("quantity", "")
+        raw_quantity = parsed.quantity or ""
         matched_quantity = re.match(
             r"[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)", raw_quantity
         )
-        quantity = matched_quantity[0] if matched_quantity else 0.0
-
+        quantity = float(matched_quantity[0]) if matched_quantity else 0.0
         ingredient = Ingredient(
             quantity=quantity,
-            unit=parsed["unit"],
-            name=parsed["name"],
-            comment=parsed["comment"],
-            input=parsed["sentence"],
+            unit=parsed.unit,
+            name=parsed.name,
+            comment=parsed.comment,
+            input=parsed.sentence,
             position=index,
         )
         ingredients.append(ingredient)

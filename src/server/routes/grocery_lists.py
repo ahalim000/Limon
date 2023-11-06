@@ -51,7 +51,6 @@ def create_grocery_list(
                     name=ingredient.name,
                     comment=ingredient.comment,
                     recipe_name=meal_plan_item.recipe.name,
-                    thumbnail_url=meal_plan_item.recipe.thumbnail_url,
                     servings=meal_plan_item.recipe.servings,
                     extra_items=False,
                 )

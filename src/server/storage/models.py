@@ -24,7 +24,6 @@ class Recipe(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     image_url: Mapped[Optional[str]] = mapped_column(String)
-    thumbnail_url: Mapped[Optional[str]] = mapped_column(String)
     source: Mapped[str] = mapped_column(String, nullable=False, default="")
     servings: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     servings_type: Mapped[str] = mapped_column(String, nullable=False, default="")
@@ -161,7 +160,6 @@ class GroceryListItem(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     comment: Mapped[Optional[str]] = mapped_column(String)
     recipe_name: Mapped[str] = mapped_column(String, nullable=False)
-    thumbnail_url: Mapped[Optional[str]] = mapped_column(String)
     servings: Mapped[int] = mapped_column(Integer, nullable=False)
     extra_items: Mapped[bool] = mapped_column(Boolean, nullable=False)
     grocery_list: Mapped["GroceryList"] = relationship(
