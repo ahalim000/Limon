@@ -56,21 +56,22 @@ def create_grocery_list(
                 )
             )
 
-    extra_items = grocery_list.extra_items.split("\n")
-    for extra_item in extra_items:
-        grocery_list.grocery_list_items.append(
-            GroceryListItem(
-                active=True,
-                quantity=0,
-                name=extra_item,
-                recipe_name="Extra Items",
-                servings=1,
-                extra_items=True,
+    if grocery_list.extra_items is not None:
+        extra_items = grocery_list.extra_items.split("\n")
+        for extra_item in extra_items:
+            grocery_list.grocery_list_items.append(
+                GroceryListItem(
+                    active=True,
+                    quantity=0,
+                    name=extra_item,
+                    recipe_name="Extra Items",
+                    servings=1,
+                    extra_items=True,
+                )
             )
-        )
 
     db.add(grocery_list)
-    db.commit()
+    db.flush()
 
     return grocery_list
 
@@ -79,7 +80,14 @@ def create_grocery_list(
 def get_grocery_list(
     id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ):
-    return db.scalars(safe_query(select, [GroceryList], user).filter_by(id=id)).one()
+    grocery_list = db.scalars(
+        safe_query(select, [GroceryList], user).filter_by(id=id)
+    ).one_or_none()
+
+    if grocery_list is None:
+        raise HTTPException(404, f"Grocery List with ID {id} does not exist")
+
+    return grocery_list
 
 
 @router.put("/{id}", response_model=GroceryListSchema)
@@ -99,21 +107,25 @@ def update_grocery_list(
         item for item in grocery_list.grocery_list_items if not item.extra_items
     ]
 
-    extra_items = request_data.pop("extra_items").split("\n")
-    for extra_item in extra_items:
-        grocery_list.grocery_list_items.append(
-            GroceryListItem(
-                active=True,
-                quantity=0,
-                name=extra_item,
-                recipe_name="Extra Items",
-                servings=1,
-                extra_items=True,
+    extra_items = request_data.pop("extra_items", grocery_list.extra_items)
+    grocery_list.extra_items = extra_items
+
+    if extra_items != "":
+        extra_items_list = extra_items.split("\n")
+        for extra_item in extra_items_list:
+            grocery_list.grocery_list_items.append(
+                GroceryListItem(
+                    active=True,
+                    quantity=0,
+                    name=extra_item,
+                    recipe_name="Extra Items",
+                    servings=1,
+                    extra_items=True,
+                )
             )
-        )
 
     db.add(grocery_list)
-    db.commit()
+    db.flush()
 
     return grocery_list
 
@@ -124,9 +136,12 @@ def delete_grocery_list(
 ):
     grocery_list = db.scalars(
         safe_query(select, [GroceryList], user).filter_by(id=id)
-    ).one()
+    ).one_or_none()
+
+    if grocery_list is None:
+        raise HTTPException(404, f"Grocery List with ID {id} does not exist")
 
     db.delete(grocery_list)
-    db.commit()
+    db.flush()
 
     return grocery_list

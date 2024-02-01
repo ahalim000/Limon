@@ -1,9 +1,19 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
+
+from pydantic import ConfigDict
 
 from server.storage.database import Base
 
@@ -17,9 +27,14 @@ class User(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)
     user_id: Mapped[int] = synonym("id")
 
+    recipes: Mapped[List["Recipe"]] = relationship("Recipe", back_populates="user")
+    tags: Mapped[List["Tag"]] = relationship("Tag", back_populates="user")
+
 
 class Recipe(Base):
     __tablename__ = "recipe"
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -37,6 +52,7 @@ class Recipe(Base):
         ForeignKey("user.id", ondelete="CASCADE"),
         nullable=False,
     )
+    user: Mapped["User"] = relationship("User", back_populates="recipes")
     ingredients: Mapped[List["Ingredient"]] = relationship(
         "Ingredient", back_populates="recipe", cascade="all, delete-orphan"
     )
@@ -56,7 +72,7 @@ class Tag(Base):
     __tablename__ = "tag"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
     user_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("user.id", ondelete="CASCADE"),
@@ -69,6 +85,9 @@ class Tag(Base):
         cascade="all, delete",
         passive_deletes=True,
     )
+    user: Mapped["User"] = relationship("User", back_populates="tags")
+
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
 
 
 class RecipeTagAssoc(Base):
@@ -155,7 +174,7 @@ class GroceryListItem(Base):
         Integer, ForeignKey("grocery_list.id", ondelete="CASCADE"), nullable=False
     )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[float] = mapped_column(Integer, nullable=False)
     unit: Mapped[Optional[str]] = mapped_column(String)
     name: Mapped[str] = mapped_column(String, nullable=False)
     comment: Mapped[Optional[str]] = mapped_column(String)

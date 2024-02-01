@@ -1,6 +1,16 @@
 from inspect import get_annotations
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
-                    TypeVar, overload)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    overload,
+)
 
 from pydantic import BaseConfig, BaseModel, create_model
 from sqlalchemy import Delete, Select, Update
@@ -21,7 +31,7 @@ QuerySignature = TypeVar(
 
 
 class OrmConfig(BaseConfig):
-    orm_mode = True
+    from_attributes = True
 
 
 def sqlalchemy_to_pydantic(

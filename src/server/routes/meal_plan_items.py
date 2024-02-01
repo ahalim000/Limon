@@ -27,8 +27,10 @@ def list_meal_plan_items(
     user: User = Depends(get_current_user),
     params: MealPlanItemListSchema = Depends(),  # type: ignore
 ):
-    query = safe_query(select, [MealPlanItem], user).filter(
-        MealPlanItem.date >= start_date, MealPlanItem.date <= end_date
+    query = (
+        safe_query(select, [MealPlanItem], user)
+        .filter(MealPlanItem.date >= start_date, MealPlanItem.date <= end_date)
+        .order_by(MealPlanItem.date)
     )
 
     for param_key, param_val in params.dict(exclude_unset=True).items():
@@ -53,7 +55,7 @@ def create_meal_plan_item(
     meal_plan_item = MealPlanItem(recipe=recipe, **request_data)
 
     db.add(meal_plan_item)
-    db.commit()
+    db.flush()
 
     return meal_plan_item
 
@@ -82,7 +84,7 @@ def update_meal_plan_item(
         setattr(meal_plan_item, key, val)
 
     db.add(meal_plan_item)
-    db.commit()
+    db.flush()
 
     return meal_plan_item
 
@@ -96,6 +98,6 @@ def delete_meal_plan_item(
     ).one()
 
     db.delete(meal_plan_item)
-    db.commit()
+    db.flush()
 
     return meal_plan_item

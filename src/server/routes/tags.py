@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from server.dependencies import get_current_user, get_db
 from server.schemas import TagCreateSchema, TagSchema, TagUpdateSchema, TagListSchema
-from server.storage.models import Tag, User
+from server.storage.models import Tag, User, Recipe
 from server.storage.utils import safe_query
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
@@ -20,7 +20,7 @@ def list_tags(
     user: User = Depends(get_current_user),
     params: TagListSchema = Depends(),  # type: ignore
 ):
-    query = safe_query(select, [Tag], user)
+    query = safe_query(select, [Tag], user).order_by(Tag.name)
 
     for param_key, param_val in params.dict(exclude_unset=True).items():
         if param_val is not None:
@@ -40,7 +40,7 @@ def create_tag(
     tag = Tag(user_id=user.id, **request_data)
 
     db.add(tag)
-    db.commit()
+    db.flush()
 
     return tag
 
@@ -60,7 +60,7 @@ def update_tag(
         setattr(tag, key, val)
 
     db.add(tag)
-    db.commit()
+    db.flush()
 
     return tag
 
@@ -72,6 +72,6 @@ def delete_tag(
     tag = db.scalars(safe_query(select, [Tag], user).filter_by(id=id)).one()
 
     db.delete(tag)
-    db.commit()
+    db.flush()
 
     return tag

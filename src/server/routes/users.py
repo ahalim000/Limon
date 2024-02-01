@@ -103,7 +103,7 @@ def list_users(
     if user.role != "admin":
         raise HTTPException(403, detail="Only admins can list users")
 
-    query = safe_query(select, [User], user)
+    query = safe_query(select, [User], user).order_by(User.username)
     for param_key, param_val in params.dict(exclude_unset=True).items():
         if param_val is not None:
             query = query.filter(getattr(User, param_key) == param_val)
@@ -124,16 +124,15 @@ def update_user(
     user: User = Depends(get_current_user),
 ):
     update_data = request_data.dict(exclude_unset=True)
-
     if "password" in update_data:
-        update_user = db.scalars(
-            safe_query(select, [User], user).filter_by(user=id)
-        ).one()
-        if user.id != update_user.id:
+        if user.id != id:
             raise HTTPException(
-                403, detail="Passwords can only be updated for same user as requester"
+                403,
+                detail="Passwords can only be updated for same user as requester",
             )
-
+        # update_user = db.scalars(
+        #     safe_query(select, [User], user).filter_by(id=id)
+        # ).one()
         update_data["hashed_password"] = hash_password(update_data.pop("password"))
 
     if "role" in update_data:
@@ -142,4 +141,6 @@ def update_user(
 
     query = safe_query(update, [User], user).filter_by(id=id).values(**update_data)
     db.execute(query)
-    db.commit()
+    db.flush()
+
+    return db.scalars(safe_query(select, [User], user).filter_by(id=id)).one()

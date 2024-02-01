@@ -34,7 +34,6 @@ def get_current_user(
         raise credentials_exception
 
     user = db.query(User).filter_by(username=username).one_or_none()
-
     if user is None:
         raise credentials_exception
 

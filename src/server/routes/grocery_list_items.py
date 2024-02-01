@@ -20,4 +20,4 @@ def toggle_grocery_list_item(
     setattr(grocery_list_item, "active", not grocery_list_item.active)
 
     db.add(grocery_list_item)
-    db.commit()
+    db.flush()

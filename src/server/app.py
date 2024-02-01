@@ -26,7 +26,7 @@ async def db_session_middleware(request: Request, call_next):
     try:
         request.state.db = SessionLocal()
         response = await call_next(request)
-        if response.status_code < 300:
+        if response.status_code < 400:
             request.state.db.commit()
         else:
             request.state.db.rollback()

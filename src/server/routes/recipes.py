@@ -69,7 +69,7 @@ def list_recipes(
     elif sort == "rand":
         query = query.order_by(func.random())
     else:
-        raise Exception(f"Sort type unsupported: {sort}")
+        raise HTTPException(status_code=400, detail=f"Sort type unsupported: {sort}")
 
     for param_key, param_val in params.dict(exclude_unset=True).items():
         if param_val is not None:
@@ -108,7 +108,7 @@ def upload_recipe_image(
 
     recipe.image_url = f"/static/{user_id}/{filename}"
     db.add(recipe)
-    db.commit()
+    db.flush()
     return recipe
 
 
@@ -140,7 +140,7 @@ def create_recipe(
         recipe.tags.append(tag)
 
     db.add(recipe)
-    db.commit()
+    db.flush()
 
     return recipe
 
@@ -186,7 +186,7 @@ def update_recipe(
             recipe.tags.append(tag)
 
     db.add(recipe)
-    db.commit()
+    db.flush()
 
     return recipe
 
@@ -196,9 +196,9 @@ def delete_recipe(
     id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ):
     recipe = db.scalars(safe_query(select, [Recipe], user).filter_by(id=id)).one()
-    resp = RecipeSchema.from_orm(recipe)
+    resp = RecipeSchema.model_validate(recipe)
 
     db.delete(recipe)
-    db.commit()
+    db.flush()
 
     return resp
