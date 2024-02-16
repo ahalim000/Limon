@@ -1,3 +1,8 @@
+import os
+
+from unittest.mock import mock_open, patch, MagicMock
+
+from typing import cast
 from server.tests.utils import get_token
 from server.tests.test_recipes_data import user_1_test_recipes
 from server.storage import models
@@ -95,16 +100,130 @@ def test_list_recipes(db, client):
 
 
 def test_upload_recipe_image(db, client):
+    user_1_token = get_token("user_1")
     user_1 = db.query(models.User).filter_by(username="user_1").one_or_none()
 
     # Valid mime type
+    recipe_1 = (
+        db.query(models.Recipe)
+        .filter_by(user_id=user_1.id)
+        .filter_by(name="Recipe 1")
+        .one()
+    )
+
+    fpath = os.path.join(os.path.dirname(__file__), "assets/black_square.jpg")
+    with open(fpath, "rb") as f:
+        image_data = f.read()
+
+    mocked_open = MagicMock()
+    with patch("builtins.open", mock_open(mocked_open)):
+        response = client.post(
+            f"/api/recipes/{recipe_1.id}/upload_image",
+            headers={"Authorization": f"Bearer {user_1_token}"},
+            files={"file": ("assets/black_square.jpg", image_data, "image/jpeg")},
+        )
+
+    assert response.status_code == 200
+    mocked_open.assert_called()
+
     # Invalid mime type
-    # Image already exists for different recipe
-    # Recipe has different image
-    # Recipe has same image
+    recipe_2 = (
+        db.query(models.Recipe)
+        .filter_by(user_id=user_1.id)
+        .filter_by(name="Recipe 2")
+        .one()
+    )
+
+    fpath = os.path.join(os.path.dirname(__file__), "assets/dummy.pdf")
+    with open(fpath, "rb") as f:
+        image_data = f.read()
+
+    mocked_open = MagicMock()
+    with patch("builtins.open", mock_open(mocked_open)):
+        response = client.post(
+            f"/api/recipes/{recipe_2.id}/upload_image",
+            headers={"Authorization": f"Bearer {user_1_token}"},
+            files={"file": ("assets/dummy.pdf", image_data, "application/pdf")},
+        )
+    assert response.status_code == 400
+
+    data = response.json()
+    assert data["detail"] == "Image file format not supported: application/pdf"
+
+    # Different recipe has same image
+    recipe_3 = (
+        db.query(models.Recipe)
+        .filter_by(user_id=user_1.id)
+        .filter_by(name="Recipe 3")
+        .one()
+    )
+
+    recipe_4 = (
+        db.query(models.Recipe)
+        .filter_by(user_id=user_1.id)
+        .filter_by(name="Recipe 4")
+        .one()
+    )
+
+    fpath = os.path.join(os.path.dirname(__file__), "assets/black_square.jpg")
+    with open(fpath, "rb") as f:
+        image_data = f.read()
+
+    mocked_open = MagicMock()
+    with patch("builtins.open", mock_open(mocked_open)):
+        response = client.post(
+            f"/api/recipes/{recipe_3.id}/upload_image",
+            headers={"Authorization": f"Bearer {user_1_token}"},
+            files={"file": ("assets/black_square.jpg", image_data, "image/jpeg")},
+        )
+        assert response.status_code == 200
+
+        mocked_open.assert_called()
+        r_3 = response.json()
+        assert r_3["image_url"] != None
+
+        response = client.post(
+            f"/api/recipes/{recipe_4.id}/upload_image",
+            headers={"Authorization": f"Bearer {user_1_token}"},
+            files={"file": ("assets/black_square.jpg", image_data, "image/jpeg")},
+        )
+        assert response.status_code == 200
+
+        mocked_open.assert_called()
+        r_4 = response.json()
+        assert r_4["image_url"] != None
+
+        assert r_3["image_url"] != r_4["image_url"]
+
+    # Recipe already has image
+    original_image_url = recipe_1.image_url
+    assert original_image_url != None
+
+    fpath = os.path.join(os.path.dirname(__file__), "assets/blue_square.png")
+    with open(fpath, "rb") as f:
+        image_data = f.read()
+
+    mocked_open = MagicMock()
+    mocked_unlink = MagicMock()
+    with patch("builtins.open", mock_open(mocked_open)), patch(
+        "os.unlink", mocked_unlink
+    ):
+        response = client.post(
+            f"/api/recipes/{recipe_1.id}/upload_image",
+            headers={"Authorization": f"Bearer {user_1_token}"},
+            files={"file": ("assets/blue_square.png", image_data, "image/jpeg")},
+        )
+
+    assert response.status_code == 200
+
+    mocked_open.assert_called()
+    mocked_unlink.assert_called()
+    r_1 = response.json()
+    assert r_1["image_url"] != None
+    assert original_image_url != r_1["image_url"]
 
 
-def test_create_recipes(db, client):
+def test_create_recipe(db, client):
     user_1_token = get_token("user_1")
     user_1 = db.query(models.User).filter_by(username="user_1").one_or_none()
 
@@ -197,7 +316,7 @@ def test_update_recipe(db, client):
     assert recipe["id"] == original_recipe_0.id
     assert recipe["user_id"] == user_1.id
     assert recipe["name"] == "Recipe 0"
-    assert recipe["image_url"] == "static/katherine-chase-zITJdTt5aLc-unsplash.png"
+    assert recipe["image_url"] == None
     assert recipe["source"] == "Family Cookbook"
     assert recipe["servings"] == 4
     assert recipe["servings_type"] == "servings"

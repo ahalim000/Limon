@@ -1,5 +1,3 @@
-from fastapi import UploadFile
-
 user_1_test_recipes = [
     # All fields
     {
@@ -88,5 +86,3 @@ user_1_test_recipes = [
     # Update Recipe 0 tags field
     {"tag_ids": []},
 ]
-
-user_1_test_recipe_images = [{}]

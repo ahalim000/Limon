@@ -47,7 +47,6 @@ def db():
             for i in range(10):
                 recipe = models.Recipe(
                     name=f"Recipe {i}",
-                    image_url="static/katherine-chase-zITJdTt5aLc-unsplash.png",
                     source="Family Cookbook",
                     servings=4,
                     servings_type="servings",
